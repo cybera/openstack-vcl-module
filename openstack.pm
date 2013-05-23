@@ -631,10 +631,32 @@ sub _get_image_flavor {
 		notify($ERRORS{'CRITICAL'}, 0, "subroutine was called as a function, it must be called as a class method");
 		return 0;
 	}
- 
-    notify($ERRORS{'OK'}, 0, "No image size information in Openstack");
+   	
+	my $os_image_name = shift;
 
-   	my $os_image_name = shift;
+	#
+	# Grab the config again, not sure this is a good way to do this
+	#
+        notify($ERRORS{'OK'}, 0, "********* Set OpenStack User Configuration******************");
+        my $computer_shortname   = $self->data->get_computer_short_name;
+        notify($ERRORS{'OK'}, 0,  "computer_shortname: $computer_shortname");
+        # User's environment file
+        my $user_config_file = '/etc/vcl/openstack/openstack.conf';
+        notify($ERRORS{'OK'}, 0,  "loading $user_config_file");
+        my %config = do($user_config_file);
+        if (!%config) {
+                notify($ERRORS{'CRITICAL'},0, "failure to process $user_config_file");
+                return 0;
+        }
+        $self->{config} = \%config;
+	
+	#
+	# Get the default flavor from the config file
+	#
+        my $os_default_flavor = $self->{config}->{os_default_flavor};
+ 
+        notify($ERRORS{'OK'}, 0, "No image size information in Openstack");
+
 
    	# XXX NOTE: The like part of this statement will cause issues if there is more than one version
    	#           of an image, which I don't think there should be -- Curtis XXX
@@ -661,7 +683,14 @@ sub _get_image_flavor {
     }
     my $flavor = $selected_rows[0]{flavor};
 
-    return $flavor;
+	if (defined($flavor) && $flavor ne "") {
+		notify($ERRORS{'OK'}, 0, "Using flavor from database");
+		return $flavor;
+	} else {
+		notify($ERRORS{'OK'}, 0, "Flavor from database is NULL, using default flavor from openstack configuration file");
+    		return $os_default_flavor;
+	}		
+
 
 } ## end sub get_image_size
 
@@ -725,6 +754,7 @@ sub _set_openstack_user_conf {
         my $os_tenant_name = $self->{config}->{os_tenant_name};
         my $os_username = $self->{config}->{os_username};
         my $os_password = $self->{config}->{os_password};
+        my $os_default_flavor = $self->{config}->{os_default_flavor};
 
 	# Set Environment File
 	$ENV{'OS_AUTH_URL'} = $os_auth_url;
