@@ -400,7 +400,7 @@ sub _wait_for_copying_image {
 	
         my $query_image = "nova image-list | grep $instance_id";
         my $query_image_output = `$query_image`;
-        my $loop = 50;
+        my $loop = 150;
 
         notify($ERRORS{'OK'}, 0, "The describe image output for $instance_id : $query_image_output");
         while ($loop > 0)
@@ -830,7 +830,7 @@ sub _terminate_instances {
 		return 1;
 	}
 	else {
-		$describe_instances = "nova list |grep $instance_private_ip";
+		$describe_instances = "nova list | grep $instance_private_ip | grep -v vcl-prod";
 		$run_describe_instances = `$describe_instances`;
 
 		if($run_describe_instances =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
