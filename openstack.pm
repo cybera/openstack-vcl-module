@@ -840,7 +840,13 @@ sub _terminate_instances {
 			$terminate_instances = "nova delete $instance_id";
 			$run_terminate_instances = `$terminate_instances`;
 			notify($ERRORS{'OK'}, 0, "The nova delete : $run_terminate_instances is terminated");
-
+			# Remove the computer and IP address from /etc/hosts to avoid duplicates -- Curtis
+			# Wonder if we just need to delete the computer name not the IP too...
+			my $sedoutput_computer_shortname = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
+			notify($ERRORS{'DEBUG'}, 0, "sed output to delete $computer_shortname from hosts file: $sedoutput_computer_shortname");
+			my $sedoutput_instance_private_ip = `sed -i "/^$instance_private_ip/d" /etc/hosts`;
+			notify($ERRORS{'DEBUG'}, 0, "sed output to delete $instance_private_ip from hosts file: $sedoutput_instance_private_ip");		
+			# done
 		}
 		else {
 			notify($ERRORS{'DEBUG'}, 0, "No running instance with the privagte ip: $instance_private_ip");
