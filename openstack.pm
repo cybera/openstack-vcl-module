@@ -1,6 +1,6 @@
 #!/usr/bin/perl -w
 ###############################################################################
-# $Id: openstack.pm 2012-4-14 
+# $Id: openstack.pm 2012-4-14
 ###############################################################################
 # Licensed to the Apache Software Foundation (ASF) under one or more
 # contributor license agreements.  See the NOTICE file distributed with
@@ -9,7 +9,7 @@
 # (the "License"); you may not use this file except in compliance with
 # the License.  You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -42,6 +42,8 @@ use File::Copy;
 use FindBin;
 use lib "$FindBin::Bin/../../..";
 use Regexp::Common qw/net/;
+use Net::OpenStack::Compute;
+use Try::Tiny;
 
 # Configure inheritance
 use base qw(VCL::Module::Provisioning);
@@ -66,24 +68,24 @@ use Fcntl qw(:DEFAULT :flock);
 =head2 initialize
 
  Parameters  :
- Returns     :
+ Returns :
  Description :
 
 =cut
 
 sub initialize {
 	my $self = shift;
-        notify($ERRORS{'DEBUG'}, 0, "OpenStack module initialized");
-	
+	notify($ERRORS{'DEBUG'}, 0, "OpenStack module initialized");
+
 	if($self->_set_openstack_user_conf) {
-        	notify($ERRORS{'OK'}, 0, "Success to OpenStack user configuration");
+		notify($ERRORS{'OK'}, 0, "Success to OpenStack user configuration");
 	}
 	else {
-        	notify($ERRORS{'CRITICAL'}, 0, "Failure to Openstack user configuration");
+		notify($ERRORS{'CRITICAL'}, 0, "Failure to Openstack user configuration");
 		return 0;
 	}
-	
-        return 1;
+
+	return 1;
 } ## end sub initialize
 
 
@@ -92,7 +94,7 @@ sub initialize {
 =head2 provision
 
  Parameters  : hash
- Returns     : 1(success) or 0(failure)
+ Returns : 1(success) or 0(failure)
  Description : loads virtual machine with requested image
 
 =cut
@@ -109,27 +111,27 @@ sub load {
 	notify($ERRORS{'OK'}, 0, "****************************************************");
 
 	# get various useful vars from the database
-	my $image_full_name      = $self->data->get_image_name;
+	my $image_full_name  = $self->data->get_image_name;
 	my $computer_shortname   = $self->data->get_computer_short_name;
 	my $request_forimaging   = $self->data->get_request_forimaging();
 
 
 	notify($ERRORS{'OK'}, 0, "Query the host to see if the $computer_shortname currently exists");
 
-	# power off the old instance if exists 
-	if(_pingnode($computer_shortname) || $request_forimaging == 0) 
+	# power off the old instance if exists
+	if(_pingnode($computer_shortname) || $request_forimaging == 0)
 	{
 		if($self->_terminate_instances) {
-	                notify($ERRORS{'OK'}, 0, "Terminate the existing computer $computer_shortname");
+			notify($ERRORS{'OK'}, 0, "Terminate the existing computer $computer_shortname");
 		}
 		else {
 			notify($ERRORS{'DEBUG'}, 0, "No instance to terminate for $computer_shortname");
-		}		
+		}
 	}
 
-	# Create new instance 
+	# Create new instance
 	my $instance_id = $self->_run_instances;
-	
+
 	if ($instance_id)
 	{
 		notify($ERRORS{'OK'}, 0, "The instance $instance_id is created\n");
@@ -141,7 +143,7 @@ sub load {
 	}
 
 	# Update the private ip of the instance in /etc/hosts file
-	if($self->_update_private_ip($instance_id)) 
+	if($self->_update_private_ip($instance_id))
 	{
 		notify($ERRORS{'OK'}, 0, "Update the private ip of instance $instance_id is succeeded\n");
 	}
@@ -158,7 +160,7 @@ sub load {
 	#sleep 300;
 	sleep 100;
 
-	# Call post_load 
+	# Call post_load
 	if ($self->os->can("post_load")) {
 		notify($ERRORS{'DEBUG'}, 0, "calling " . ref($self->os) . "->post_load()");
 		if ($self->os->post_load()) {
@@ -182,27 +184,27 @@ sub load {
 =head2 capture
 
  Parameters  : $request_data_hash_reference
- Returns     : 1 if sucessful, 0 if failed
+ Returns : 1 if sucessful, 0 if failed
  Description : Creates a new vmware image.
 
 =cut
 
 sub capture {
-        notify($ERRORS{'DEBUG'}, 0, "**********************************************************");
-        notify($ERRORS{'OK'},    0, "Entering Openstack Capture routine");
-        my $self = shift;
+	notify($ERRORS{'DEBUG'}, 0, "**********************************************************");
+	notify($ERRORS{'OK'},0, "Entering Openstack Capture routine");
+	my $self = shift;
 
-        if (ref($self) !~ /openstack/i) {
-                notify($ERRORS{'CRITICAL'}, 0, "subroutine was called as a function, it must be called as a class method");
-                return 0;
-        }
+	if (ref($self) !~ /openstack/i) {
+		notify($ERRORS{'CRITICAL'}, 0, "subroutine was called as a function, it must be called as a class method");
+		return 0;
+	}
 
-        my $image_name     = $self->data->get_image_name();
-        my $computer_shortname = $self->data->get_computer_short_name;
+	my $image_name = $self->data->get_image_name();
+	my $computer_shortname = $self->data->get_computer_short_name;
 	my $instance_id;
-	
-        if(_pingnode($computer_shortname))
-        {
+
+	if(_pingnode($computer_shortname))
+	{
 		$instance_id = $self->_get_instance_id;
 		notify($ERRORS{'OK'}, 0, "instance id: $instance_id is done");
 		if(!$instance_id)
@@ -210,84 +212,77 @@ sub capture {
 			notify($ERRORS{'DEBUG'}, 0, "unable to get instance id for $computer_shortname");
 			return 0;
 		}
-        }
+	}
 	else {
 		notify($ERRORS{'DEBUG'}, 0, "unable to ping to $computer_shortname");
 		return 0;
 	}
-		
-        if($self->_prepare_capture)
+
+	if($self->_prepare_capture)
 	{
 		notify($ERRORS{'OK'}, 0, "Prepare_Capture for $computer_shortname is done");
 	}
-	
-	my $new_image_name = $self->_image_create($instance_id);
 
-	if($new_image_name)
+	my $openstack_image_id = $self->_image_create($instance_id);
+
+	if(!$openstack_image_id)
 	{
-		notify($ERRORS{'OK'}, 0, "Create Image for $computer_shortname is done");
+		notify($ERRORS{'CRITICAL'}, 0, "Nova create image request failed");
+		return 0;
 	}
 
-	if($self->_insert_openstack_image_name($new_image_name))
+	if(!$self->_insert_openstack_image_name($openstack_image_id))
 	{
-	        notify($ERRORS{'OK'}, 0, "Successfully insert image name");
-        }
-
-	if($self->_wait_for_copying_image($instance_id)) 
-	{
-		notify($ERRORS{'OK'}, 0, "Wait for copying $new_image_name is succeeded\n");
+		notify($ERRORS{'CRITICAL'}, 0, "Database insert failed");
+		return 0;
 	}
 
-        return 1;
+	if(!$self->_wait_for_copying_image($openstack_image_id))
+	{
+		notify($ERRORS{'CRITICAL'}, 0, "Image copying failed");
+	}
+
+	return 1;
 } ## end sub capture
 
 sub _image_create{
 	my $self = shift;
 	my $instance_id = shift;
 	my $imagerevision_comments = $self->data->get_imagerevision_comments(0);
-        my $image_name     = $self->data->get_image_name();
-	
+	my $image_name = $self->data->get_image_name();
+
 	my $image_version;
-        if($image_name =~ m/(-+)(.+)(-v\d+)/g)
-        {
-                $image_version = $3;
-                notify($ERRORS{'OK'}, 0, "Acquire the Image Version: $image_version");
-        }
+	if($image_name =~ m/(-+)(.+)(-v\d+)/g)
+	{
+		$image_version = $3;
+		notify($ERRORS{'OK'}, 0, "Acquire the Image Version: $image_version");
+	}
 
-        my $image_description = $image_name . '-' . $imagerevision_comments;
-        my $capture_image = "nova image-create $instance_id $image_description";
-        notify($ERRORS{'OK'}, 0, "New Image Capture Command: $capture_image");
-        my $capture_image_output = `$capture_image`;
+	my $image_description = $image_name . '-' . $imagerevision_comments;
+	my $openstack_image_id;
+	notify($ERRORS{'OK'}, 0, "Capturing instance $instance_id for $image_description");
 
-        my $openstack_image_id;
-        my $new_image_name;
-        my $describe_image = "nova image-list |grep $instance_id";
-        my $run_describe_image_output = `$describe_image`;
-        notify($ERRORS{'OK'}, 0, "The images: $run_describe_image_output");
+	try
+	{
+		my $image = $self->{compute}->create_image($instance_id, { name => $image_description});
+		$openstack_image_id = $image->{id};
+		notify($ERRORS{'OK'}, 0, "OpenStack image ID: $openstack_image_id");
+	}
+	catch
+	{
+		notify($ERRORS{'WARNING'}, 0, "Failed to capture image");
+		$openstack_image_id = "";
+	};
 
-	sleep 10;
-
-        if($run_describe_image_output  =~ m/^\|\s(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
-        {
-                $openstack_image_id = $1;
-                $new_image_name = $openstack_image_id .'-v'. $image_version;
-                notify($ERRORS{'OK'}, 0, "The Openstack Image ID:$openstack_image_id");
-                notify($ERRORS{'OK'}, 0, "The New Image Name:$new_image_name");
-                return $new_image_name;
-        }
-        else
-        {
-                notify($ERRORS{'DEBUG'}, 0, "Fail to capture new Image");
-                return 0;
-        }
+	return $openstack_image_id;
 }
 
 sub _get_instance_id {
 	my $self = shift;
-	
-        my $describe_instance;
-        my $describe_instance_output;
-        my $instance_id;
+
+	my $describe_instance;
+	my $describe_instance_output;
+	my $instance_id;
 
 	my $instance_private_ip = $self->data->get_computer_private_ip_address();
 	my $computer_shortname = $self->data->get_computer_short_name;
@@ -316,50 +311,50 @@ sub _get_instance_id {
 
 sub _prepare_capture {
 	my $self = shift;
-	
-        my ($package, $filename, $line, $sub) = caller(0);
-        my $request_data = $self->data->get_request_data;
 
-        if (!$request_data) {
-                notify($ERRORS{'WARNING'}, 0, "unable to retrieve request data hash");
-                return 0;
-        }
+	my ($package, $filename, $line, $sub) = caller(0);
+	my $request_data = $self->data->get_request_data;
 
-        my $request_id     = $self->data->get_request_id;
-        my $reservation_id = $self->data->get_reservation_id;
-        my $management_node_keys     = $self->data->get_management_node_keys();
+	if (!$request_data) {
+		notify($ERRORS{'WARNING'}, 0, "unable to retrieve request data hash");
+		return 0;
+	}
 
-        my $image_id       = $self->data->get_image_id;
-        my $image_os_name  = $self->data->get_image_os_name;
-        my $image_identity = $self->data->get_image_identity;
-        my $image_os_type  = $self->data->get_image_os_type;
-        my $image_name     = $self->data->get_image_name();
+	my $request_id = $self->data->get_request_id;
+	my $reservation_id = $self->data->get_reservation_id;
+	my $management_node_keys = $self->data->get_management_node_keys();
 
-        my $computer_id        = $self->data->get_computer_id;
-        my $computer_shortname = $self->data->get_computer_short_name;
-        my $computer_nodename  = $computer_shortname;
-        my $computer_hostname  = $self->data->get_computer_hostname;
-        my $computer_type      = $self->data->get_computer_type;
+	my $image_id   = $self->data->get_image_id;
+	my $image_os_name  = $self->data->get_image_os_name;
+	my $image_identity = $self->data->get_image_identity;
+	my $image_os_type  = $self->data->get_image_os_type;
+	my $image_name = $self->data->get_image_name();
 
-        if (write_currentimage_txt($self->data)) {
-                notify($ERRORS{'OK'}, 0, "currentimage.txt updated on $computer_shortname");
-        }
-        else {
-                notify($ERRORS{'DEBUG'}, 0, "unable to update currentimage.txt on $computer_shortname");
-                return 0;
-        }
+	my $computer_id	= $self->data->get_computer_id;
+	my $computer_shortname = $self->data->get_computer_short_name;
+	my $computer_nodename  = $computer_shortname;
+	my $computer_hostname  = $self->data->get_computer_hostname;
+	my $computer_type  = $self->data->get_computer_type;
 
-        $self->data->set_imagemeta_sysprep(0);
-        notify($ERRORS{'OK'}, 0, "Set the imagemeta Sysprep value to 0");
+	if (write_currentimage_txt($self->data)) {
+		notify($ERRORS{'OK'}, 0, "currentimage.txt updated on $computer_shortname");
+	}
+	else {
+		notify($ERRORS{'DEBUG'}, 0, "unable to update currentimage.txt on $computer_shortname");
+		return 0;
+	}
 
-        if ($self->os->can("pre_capture")) {
-                notify($ERRORS{'OK'}, 0, "calling OS module's pre_capture() subroutine");
+	$self->data->set_imagemeta_sysprep(0);
+	notify($ERRORS{'OK'}, 0, "Set the imagemeta Sysprep value to 0");
 
-                if (!$self->os->pre_capture({end_state => 'on'})) {
-                        notify($ERRORS{'DEBUG'}, 0, "OS module pre_capture() failed");
-                        return 0;
-                }
-        }
+	if ($self->os->can("pre_capture")) {
+		notify($ERRORS{'OK'}, 0, "calling OS module's pre_capture() subroutine");
+
+		if (!$self->os->pre_capture({end_state => 'on'})) {
+			notify($ERRORS{'DEBUG'}, 0, "OS module pre_capture() failed");
+			return 0;
+		}
+	}
 	return 1;
 }
 
@@ -367,69 +362,76 @@ sub _insert_openstack_image_name {
 
 	my $self = shift;
 	my $openstack_image_name = shift;
-        my $image_name     = $self->data->get_image_name();       
+	my $image_name = $self->data->get_image_name();
 
-        my $insert_statement = "
-        INSERT INTO
-        openstackImageNameMap (
-          openstackImageNameMap.openstackimagename,
-          openstackImageNameMap.vclimagename
-        ) VALUES (
-          '$openstack_image_name',
-          '$image_name')";
+	my $insert_statement = "
+	INSERT INTO
+	openstackImageNameMap (
+	  openstackImageNameMap.openstackimagename,
+	  openstackImageNameMap.vclimagename
+	) VALUES (
+	  '$openstack_image_name',
+	  '$image_name')";
 
-        notify($ERRORS{'OK'}, 0, "$insert_statement");
+	notify($ERRORS{'OK'}, 0, "$insert_statement");
 
-        my $requested_id = database_execute($insert_statement);
-        notify($ERRORS{'OK'}, 0, "SQL Insert is first time or requested_id : $requested_id");
+	my $requested_id = database_execute($insert_statement);
+	notify($ERRORS{'OK'}, 0, "SQL Insert is first time or requested_id : $requested_id");
 
-        if (!$requested_id) {
-                notify($ERRORS{'OK'}, 0, "Successfully insert image name");
+	if (!$requested_id) {
+		notify($ERRORS{'OK'}, 0, "Successfully insert image name");
 		return 1;
-        }
-        else {
-                notify($ERRORS{'DEBUG'}, 0, "unable to insert image name");
-                return 0;
-        }
+	}
+	else {
+		notify($ERRORS{'WARNING'}, 0, "Unable to insert image name");
+		return 0;
+	}
 }
 
 sub _wait_for_copying_image {
 	my $self = shift;
-	
-	my $instance_id = shift;
-	
-        my $query_image = "nova image-list | grep $instance_id";
-        my $query_image_output = `$query_image`;
-        my $loop = 150;
 
-        notify($ERRORS{'OK'}, 0, "The describe image output for $instance_id : $query_image_output");
-        while ($loop > 0)
-        {
-		if($query_image_output  =~ m/\|\s(\w{6})\s\|/g )
-		{
-                        my $temp = $1;
+	my $openstack_image_id = shift;
 
-                        if( $temp eq 'ACTIVE') {
-                               notify($ERRORS{'OK'}, 0, "$instance_id is available now");
-                               goto RELOAD;
-                        }
-                        elsif ($temp eq 'SAVING') {
-                                notify($ERRORS{'OK'}, 0, "Sleep to capture New Image for 25 secs");
-                                sleep 25;
-                        }
-                        else {
-                                notify($ERRORS{'DEBUG'}, 0, "Failure for $instance_id");
-				return 0;
-                        }
-                }
-                $query_image_output = `$query_image`;
-                notify($ERRORS{'OK'}, 0, "The describe image output of loop #$loop: $query_image_output");
-                $loop--;
-        }
-        RELOAD:
-        #notify($ERRORS{'OK'}, 0, "Sleep until image is available");
-        sleep 30;
-	
+	my $image_details = $self->{compute}->get_image($openstack_image_id);
+	my $status;
+
+	if (!$image_details)
+	{
+		notify($ERRORS{'WARNING'}, 0, "Get image request failed"):
+		return 0;
+	}
+	else
+	{
+		$status = $image_details->{status};
+	}
+
+	my $loop = 150;
+
+	notify($ERRORS{'OK'}, 0, "The status for $openstack_image_id: $status");
+	while ($loop > 0)
+	{
+		if($status eq 'ACTIVE') {
+			notify($ERRORS{'OK'}, 0, "$openstack_image_id is available now");
+			break;
+		}
+		elsif ($status eq 'SAVING') {
+			notify($ERRORS{'OK'}, 0, "Sleep to capture New Image for 25 secs");
+			sleep 25;
+		}
+		else {
+			notify($ERRORS{'WARNING'}, 0, "Failure for $openstack_image_id");
+			return 0;
+		}
+
+		$image_details = $self->{compute}->get_image($openstack_image_id);
+		$status = $image_details->{status};
+		notify($ERRORS{'OK'}, 0, "Status of image for loop #$loop: $status");
+		$loop--;
+	}
+	#notify($ERRORS{'OK'}, 0, "Sleep until image is available");
+	sleep 30;
+
 	return 1;
 }
 
@@ -438,7 +440,7 @@ sub _wait_for_copying_image {
 =head2 node_status
 
  Parameters  : $nodename, $log
- Returns     : array of related status checks
+ Returns : array of related status checks
  Description : checks on sshd, currentimage
 
 =cut
@@ -448,21 +450,21 @@ sub node_status {
 
 	my ($package, $filename, $line, $sub) = caller(0);
 
-	my $vmpath             = 0;
-	my $datastorepath      = 0;
+	my $vmpath	 = 0;
+	my $datastorepath  = 0;
 	my $vcl_requestedimagename = 0;
 	my $requestedimagename = 0;
-	my $vmhost_type        = 0;
-	my $vmhost_hostname    = 0;
+	my $vmhost_type	= 0;
+	my $vmhost_hostname= 0;
 	my $vmhost_imagename   = 0;
-	my $image_os_type      = 0;
+	my $image_os_type  = 0;
 	my $vmclient_shortname = 0;
 	my $request_forimaging = 0;
-	my $identity_keys      = 0;
-	my $log                = 0;
+	my $identity_keys  = 0;
+	my $log		= 0;
 	my $computer_node_name = 0;
 
-	# Set IAAS Environment 
+	# Set IAAS Environment
 	notify($ERRORS{'OK'}, 0, "Set OpenStack Environment");
 
 
@@ -473,9 +475,9 @@ sub node_status {
 			$log = $self->{logfile};
 			#notify($ERRORS{'DEBUG'}, $log, "self is a hash reference");
 			$vcl_requestedimagename = $self->{imagerevision}->{imagename};
-			$image_os_type      = $self->{image}->{OS}->{type};
+			$image_os_type  = $self->{image}->{OS}->{type};
 			$computer_node_name = $self->{computer}->{hostname};
-			$identity_keys      = $self->{managementnode}->{keys};
+			$identity_keys  = $self->{managementnode}->{keys};
 
 		} ## end if (ref($self) eq 'HASH')
 		# Check if node_status returned an array ref
@@ -490,10 +492,10 @@ sub node_status {
 		# $self->data->get_request_data;
 		# get state of vm
 		$vcl_requestedimagename = $self->data->get_image_name;
-		$image_os_type      = $self->data->get_image_os_type;
+		$image_os_type  = $self->data->get_image_os_type;
 		$vmclient_shortname = $self->data->get_computer_short_name;
 		$request_forimaging = $self->data->get_request_forimaging();
-		$identity_keys      = $self->data->get_management_node_keys;
+		$identity_keys  = $self->data->get_management_node_keys;
 	} ## end else [ if (ref($self) !~ /esx/i)
 
 	notify($ERRORS{'OK'}, 0, "Entering node_status, checking status of $vmclient_shortname");
@@ -506,11 +508,11 @@ sub node_status {
 	my %status;
 
 	# Initialize all hash keys here to make sure they're defined
-	$status{status}       = 0;
+	$status{status}   = 0;
 	$status{currentimage} = 0;
-	$status{ping}         = 0;
-	$status{ssh}          = 0;
-	$status{vmstate}      = 0;    #on or off
+	$status{ping}	 = 0;
+	$status{ssh}	  = 0;
+	$status{vmstate}  = 0;    #on or off
 	$status{image_match}  = 0;
 
 	# Check if node is pingable
@@ -586,17 +588,17 @@ sub does_image_exist {
 	my $image_os_type  = $self->data->get_image_os_type;
 
 	# Match image name between VCL database and openstack Hbase database
-        my $image_name = _match_image_name($image_fullname);
+	my $image_name = _match_image_name($image_fullname);
 
 	if($image_name  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})-v/g )
 	{
-                $image_name = $1;
-                notify($ERRORS{'OK'}, 0, "Acquire the Image ID: $image_name");
-        }
-        else {
-                notify($ERRORS{'DEBUG'}, 0, "Fail to acquire the Image ID: $image_name");
-                return 0;
-        }
+		$image_name = $1;
+		notify($ERRORS{'OK'}, 0, "Acquire the Image ID: $image_name");
+	}
+	else {
+		notify($ERRORS{'DEBUG'}, 0, "Fail to acquire the Image ID: $image_name");
+		return 0;
+	}
 
 	my $describe_images = "nova image-list | grep $image_name";
 	my $describe_images_output = `$describe_images`;
@@ -620,8 +622,8 @@ sub does_image_exist {
 =head2  getimageflavor
 
  Parameters  : imagename
- Returns     : 0 failure or flavor type
- Description : flavor type 
+ Returns : 0 failure or flavor type
+ Description : flavor type
 
 =cut
 
@@ -631,35 +633,35 @@ sub _get_image_flavor {
 		notify($ERRORS{'CRITICAL'}, 0, "subroutine was called as a function, it must be called as a class method");
 		return 0;
 	}
-   	
+
 	my $os_image_name = shift;
 
 	#
 	# Grab the config again, not sure this is a good way to do this
 	#
-        notify($ERRORS{'OK'}, 0, "********* Set OpenStack User Configuration******************");
-        my $computer_shortname   = $self->data->get_computer_short_name;
-        notify($ERRORS{'OK'}, 0,  "computer_shortname: $computer_shortname");
-        # User's environment file
-        my $user_config_file = '/etc/vcl/openstack/openstack.conf';
-        notify($ERRORS{'OK'}, 0,  "loading $user_config_file");
-        my %config = do($user_config_file);
-        if (!%config) {
-                notify($ERRORS{'CRITICAL'},0, "failure to process $user_config_file");
-                return 0;
-        }
-        $self->{config} = \%config;
-	
+	notify($ERRORS{'OK'}, 0, "********* Set OpenStack User Configuration******************");
+	my $computer_shortname   = $self->data->get_computer_short_name;
+	notify($ERRORS{'OK'}, 0,  "computer_shortname: $computer_shortname");
+	# User's environment file
+	my $user_config_file = '/etc/vcl/openstack/openstack.conf';
+	notify($ERRORS{'OK'}, 0,  "loading $user_config_file");
+	my %config = do($user_config_file);
+	if (!%config) {
+		notify($ERRORS{'CRITICAL'},0, "failure to process $user_config_file");
+		return 0;
+	}
+	$self->{config} = \%config;
+
 	#
 	# Get the default flavor from the config file
 	#
-        my $os_default_flavor = $self->{config}->{os_default_flavor};
- 
-        notify($ERRORS{'OK'}, 0, "No image size information in Openstack");
+	my $os_default_flavor = $self->{config}->{os_default_flavor};
+
+	notify($ERRORS{'OK'}, 0, "No image size information in Openstack");
 
 
-   	# XXX NOTE: The like part of this statement will cause issues if there is more than one version
-   	#           of an image, which I don't think there should be -- Curtis XXX
+	# XXX NOTE: The like part of this statement will cause issues if there is more than one version
+	#	   of an image, which I don't think there should be -- Curtis XXX
 	my $select_statement = "
 	SELECT
 	flavor
@@ -670,26 +672,26 @@ sub _get_image_flavor {
 	";
 
 	notify($ERRORS{'OK'}, 0, "flavor select_statement: $select_statement");
-    # Call the database select subroutine
-    # This will return an array of one or more rows based on the select statement
-    my @selected_rows = database_select($select_statement);
+# Call the database select subroutine
+# This will return an array of one or more rows based on the select statement
+my @selected_rows = database_select($select_statement);
 	# Check to make sure 1 row was returned
-    if (scalar @selected_rows == 0) {
-            return 0;
-    }
-    elsif (scalar @selected_rows > 1) {
-            notify($ERRORS{'WARNING'}, 0, "" . scalar @selected_rows . " rows were returned from database select");
-            return 0;
-    }
-    my $flavor = $selected_rows[0]{flavor};
+if (scalar @selected_rows == 0) {
+	return 0;
+}
+elsif (scalar @selected_rows > 1) {
+	notify($ERRORS{'WARNING'}, 0, "" . scalar @selected_rows . " rows were returned from database select");
+	return 0;
+}
+my $flavor = $selected_rows[0]{flavor};
 
 	if (defined($flavor) && $flavor ne "") {
 		notify($ERRORS{'OK'}, 0, "Using flavor from database");
 		return $flavor;
 	} else {
 		notify($ERRORS{'OK'}, 0, "Flavor from database is NULL, using default flavor from openstack configuration file");
-    		return $os_default_flavor;
-	}		
+		return $os_default_flavor;
+	}
 
 
 } ## end sub get_image_size
@@ -701,7 +703,7 @@ sub _get_image_flavor {
 =head2  getimagesize
 
  Parameters  : imagename
- Returns     : 0 failure or size of image
+ Returns : 0 failure or size of image
  Description : in size of Kilobytes
 
 =cut
@@ -712,19 +714,19 @@ sub get_image_size {
 		notify($ERRORS{'CRITICAL'}, 0, "subroutine was called as a function, it must be called as a class method");
 		return 0;
 	}
- 
-        notify($ERRORS{'OK'}, 0, "No image size information in Openstack");
+
+	notify($ERRORS{'OK'}, 0, "No image size information in Openstack");
 
 	return;
 } ## end sub get_image_size
 
 #/////////////////////////////////////////////////////////////////////////////
 
-=head2 _set_openstack_user_conf 
+=head2 _set_openstack_user_conf
 
- Parameters  : None 
- Returns     : 1(success) or 0(failure)
- Description : load environment profile and set global environemnt variables 
+ Parameters  : None
+ Returns : 1(success) or 0(failure)
+ Description : load environment profile and set global environemnt variables
 
 example: openstack.conf
 "os_tenant_name" => "admin",
@@ -738,23 +740,23 @@ example: openstack.conf
 sub _set_openstack_user_conf {
 
 	my $self = shift;
-        notify($ERRORS{'OK'}, 0, "********* Set OpenStack User Configuration******************");
+	notify($ERRORS{'OK'}, 0, "********* Set OpenStack User Configuration******************");
 	my $computer_shortname   = $self->data->get_computer_short_name;
-        notify($ERRORS{'OK'}, 0,  "computer_shortname: $computer_shortname");
+	notify($ERRORS{'OK'}, 0,  "computer_shortname: $computer_shortname");
 	# User's environment file
 	my $user_config_file = '/etc/vcl/openstack/openstack.conf';
-        notify($ERRORS{'OK'}, 0,  "loading $user_config_file");
-        my %config = do($user_config_file);
-        if (!%config) {
-                notify($ERRORS{'CRITICAL'},0, "failure to process $user_config_file");
-                return 0;
-        }
-        $self->{config} = \%config;
-        my $os_auth_url = $self->{config}->{os_auth_url};
-        my $os_tenant_name = $self->{config}->{os_tenant_name};
-        my $os_username = $self->{config}->{os_username};
-        my $os_password = $self->{config}->{os_password};
-        my $os_default_flavor = $self->{config}->{os_default_flavor};
+	notify($ERRORS{'OK'}, 0,  "loading $user_config_file");
+	my %config = do($user_config_file);
+	if (!%config) {
+		notify($ERRORS{'CRITICAL'},0, "failure to process $user_config_file");
+		return 0;
+	}
+	$self->{config} = \%config;
+	my $os_auth_url = $self->{config}->{os_auth_url};
+	my $os_tenant_name = $self->{config}->{os_tenant_name};
+	my $os_username = $self->{config}->{os_username};
+	my $os_password = $self->{config}->{os_password};
+	my $os_default_flavor = $self->{config}->{os_default_flavor};
 
 	# Set Environment File
 	$ENV{'OS_AUTH_URL'} = $os_auth_url;
@@ -762,15 +764,15 @@ sub _set_openstack_user_conf {
 	$ENV{'OS_USERNAME'} = $os_username;
 	$ENV{'OS_PASSWORD'} = $os_password;
 
-        return 1;
+	return 1;
 }# _set_openstack_user_conf close
 
 #/////////////////////////////////////////////////////////////////////////////
 
-=head2 _match_image_name 
+=head2 _match_image_name
 
- Parameters  : None 
- Returns     : image_name of Openstack 
+ Parameters  : None
+ Returns : image_name of Openstack
  Description : match VCL image name with Openstack image name and set the image_name
 
 =cut
@@ -782,8 +784,8 @@ sub _match_image_name {
 
 	my $select_statement = "
 	SELECT
-	openstackImageNameMap.openstackimagename as openstack_name, 
-	openstackImageNameMap.vclimagename as vcl_name 
+	openstackImageNameMap.openstackimagename as openstack_name,
+	openstackImageNameMap.vclimagename as vcl_name
 	FROM
 	openstackImageNameMap
 	WHERE
@@ -791,32 +793,32 @@ sub _match_image_name {
 	";
 
 	notify($ERRORS{'OK'}, 0, "$select_statement");
-        # Call the database select subroutine
-        # This will return an array of one or more rows based on the select statement
-        my @selected_rows = database_select($select_statement);
+	# Call the database select subroutine
+	# This will return an array of one or more rows based on the select statement
+	my @selected_rows = database_select($select_statement);
 	# Check to make sure 1 row was returned
-        if (scalar @selected_rows == 0) {
-                return 1;
-        }
-        elsif (scalar @selected_rows > 1) {
-                notify($ERRORS{'WARNING'}, 0, "" . scalar @selected_rows . " rows were returned from database select");
-                return 0;
-        }
-        my $openstack_image_name = $selected_rows[0]{openstack_name};
-        my $vcl_imagename  = $selected_rows[0]{vcl_name};
+	if (scalar @selected_rows == 0) {
+		return 1;
+	}
+	elsif (scalar @selected_rows > 1) {
+		notify($ERRORS{'WARNING'}, 0, "" . scalar @selected_rows . " rows were returned from database select");
+		return 0;
+	}
+	my $openstack_image_name = $selected_rows[0]{openstack_name};
+	my $vcl_imagename  = $selected_rows[0]{vcl_name};
 
-        notify($ERRORS{'OK'}, 0, "new image name (openstack_image_name) =$openstack_image_name");
-        notify($ERRORS{'OK'}, 0, "new image name (vcl_image_name) =$vcl_imagename");
-	
+	notify($ERRORS{'OK'}, 0, "new image name (openstack_image_name) =$openstack_image_name");
+	notify($ERRORS{'OK'}, 0, "new image name (vcl_image_name) =$vcl_imagename");
+
 	return $openstack_image_name;
 
 }# _match_image_name close
 
 
 sub _terminate_instances {
-	
+
 	my $self = shift;
-	
+
 	my $computer_shortname  = $self->data->get_computer_short_name;
 	my $instance_private_ip = $self->data->get_computer_private_ip_address();
 
@@ -845,7 +847,7 @@ sub _terminate_instances {
 			my $sedoutput_computer_shortname = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
 			notify($ERRORS{'DEBUG'}, 0, "sed output to delete $computer_shortname from hosts file: $sedoutput_computer_shortname");
 			my $sedoutput_instance_private_ip = `sed -i "/^$instance_private_ip/d" /etc/hosts`;
-			notify($ERRORS{'DEBUG'}, 0, "sed output to delete $instance_private_ip from hosts file: $sedoutput_instance_private_ip");		
+			notify($ERRORS{'DEBUG'}, 0, "sed output to delete $instance_private_ip from hosts file: $sedoutput_instance_private_ip");
 			# done
 		}
 		else {
@@ -853,38 +855,37 @@ sub _terminate_instances {
 			return 0;
 		}
 	}
-	
+
 	return 1;
 }
 
 sub _run_instances {
 	my $self = shift;
-	
+
 	my $key_name = 'vclkey';
 	my $image_full_name = $self->data->get_image_name;
 	my $computer_shortname  = $self->data->get_computer_short_name;
 
-        my $image_name = _match_image_name($image_full_name);
-	if($image_name  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})-v/g )
+	my $image_name = _match_image_name($image_full_name);
+	if($image_name  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
 	{
-                $image_name = $1;
-                notify($ERRORS{'OK'}, 0, "Acquire the Image ID: $image_name");
-        }
-        else {
-                notify($ERRORS{'DEBUG'}, 0, "Fail to acquire the Image ID: $image_name");
-                return 0;
-        }
+		notify($ERRORS{'OK'}, 0, "Acquire the Image ID: $image_name");
+	}
+	else
+	{
+		notify($ERRORS{'DEBUG'}, 0, "Fail to acquire the Image ID: $image_name");
+		return 0;
+	}
 
 	my $flavor_type = $self->_get_image_flavor($image_name);
 	notify($ERRORS{'DEBUG'}, 0, "flavor is: $flavor_type");
 
-
 	my $run_instance = "nova boot --flavor $flavor_type --image $image_name --key_name $key_name $computer_shortname";
 	notify($ERRORS{'OK'}, 0, "The run_instance: $run_instance\n");
-	
+
 	my $run_instance_output = `$run_instance`;
 	my $instance_id;
-	
+
 	notify($ERRORS{'OK'}, 0, "The run_instance Output: $run_instance_output\n");
 	if($run_instance_output  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
 	{
@@ -901,7 +902,7 @@ sub _run_instances {
 
 sub _update_private_ip {
 	my $self = shift;
-	
+
 	my $instance_id = shift;
 	my $main_loop = 60;
 	my $private_ip;
@@ -913,7 +914,7 @@ sub _update_private_ip {
 	# Find the correct instance among running instances using the private IP
 	while($main_loop > 0 && !defined($private_ip))
 	{
-		notify($ERRORS{'OK'}, 0, "Try to fetch the Private IP on Computer $computer_shortname: Number $main_loop");	
+		notify($ERRORS{'OK'}, 0, "Try to fetch the Private IP on Computer $computer_shortname: Number $main_loop");
 		$describe_instance_output = `$describe_instance`;
 		notify($ERRORS{'OK'}, 0, "Describe Instance: $describe_instance_output");
 
@@ -942,7 +943,7 @@ sub _update_private_ip {
 		$main_loop--;
 	}
 	EXIT_WHILELOOP:
-	
+
 	return 1;
 }
 #/////////////////////////////////////////////////////////////////////////////
