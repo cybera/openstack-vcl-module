@@ -401,10 +401,8 @@ sub _wait_for_copying_image {
 		notify($ERRORS{'WARNING'}, 0, "Get image request failed"):
 		return 0;
 	}
-	else
-	{
-		$status = $image_details->{status};
-	}
+
+	$status = $image_details->{status};
 
 	my $loop = 150;
 
@@ -429,6 +427,12 @@ sub _wait_for_copying_image {
 		notify($ERRORS{'OK'}, 0, "Status of image for loop #$loop: $status");
 		$loop--;
 	}
+
+	if ($status ne 'ACTIVE') {
+		notify($ERRORS{'WARNING'}, 0, "Timed out waiting for image to become available");
+		return 0;
+	}
+
 	#notify($ERRORS{'OK'}, 0, "Sleep until image is available");
 	sleep 30;
 
@@ -512,7 +516,7 @@ sub node_status {
 	$status{currentimage} = 0;
 	$status{ping}	 = 0;
 	$status{ssh}	  = 0;
-	$status{vmstate}  = 0;    #on or off
+	$status{vmstate}  = 0;	#on or off
 	$status{image_match}  = 0;
 
 	# Check if node is pingable
@@ -588,31 +592,16 @@ sub does_image_exist {
 	my $image_os_type  = $self->data->get_image_os_type;
 
 	# Match image name between VCL database and openstack Hbase database
-	my $image_name = _match_image_name($image_fullname);
+	my $openstack_image_id = _match_image_name($image_fullname);
+	my $image = $self->{compute}->get_image($openstack_image_id);
 
-	if($image_name  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})-v/g )
-	{
-		$image_name = $1;
-		notify($ERRORS{'OK'}, 0, "Acquire the Image ID: $image_name");
+	if (!$image) {
+		notify($ERRORS{'WARNING'}, 0, "The Image $openstack_image_id does NOT exists");
+		return 0;
 	}
 	else {
-		notify($ERRORS{'DEBUG'}, 0, "Fail to acquire the Image ID: $image_name");
-		return 0;
-	}
-
-	my $describe_images = "nova image-list | grep $image_name";
-	my $describe_images_output = `$describe_images`;
-
-	notify($ERRORS{'OK'}, 0, "The describe_image output: $describe_images_output");
-
-	if ($describe_images_output =~ /$image_name/) {
-		notify($ERRORS{'OK'}, 0, "The Image $image_name exists");
+		notify($ERRORS{'OK'}, 0, "The Image $openstack_image_id exists");
 		return 1;
-	}
-	else
-	{
-		notify($ERRORS{'WARNING'}, 0, "The Image $image_name does NOT exists");
-		return 0;
 	}
 
 } ## end sub does_image_exist
@@ -839,9 +828,15 @@ sub _terminate_instances {
 		{
 			$instance_id = $&;
 			notify($ERRORS{'OK'}, 0, "Terminate the existing instance");
-			$terminate_instances = "nova delete $instance_id";
-			$run_terminate_instances = `$terminate_instances`;
-			notify($ERRORS{'OK'}, 0, "The nova delete : $run_terminate_instances is terminated");
+			try
+			{
+				$self->{compute}->delete_server($instance_id);
+			}
+			catch
+			{
+				notify($ERRORS{'WARNING'}, 0, "Failed to delete instance $instance_id: $_");
+			};
+			notify($ERRORS{'OK'}, 0, "Deleted instance $instance_id");
 			# Remove the computer and IP address from /etc/hosts to avoid duplicates -- Curtis
 			# Wonder if we just need to delete the computer name not the IP too...
 			my $sedoutput_computer_shortname = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
@@ -880,24 +875,17 @@ sub _run_instances {
 	my $flavor_type = $self->_get_image_flavor($image_name);
 	notify($ERRORS{'DEBUG'}, 0, "flavor is: $flavor_type");
 
-	my $run_instance = "nova boot --flavor $flavor_type --image $image_name --key_name $key_name $computer_shortname";
-	notify($ERRORS{'OK'}, 0, "The run_instance: $run_instance\n");
-
-	my $run_instance_output = `$run_instance`;
-	my $instance_id;
-
-	notify($ERRORS{'OK'}, 0, "The run_instance Output: $run_instance_output\n");
-	if($run_instance_output  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
+	try
 	{
-		$instance_id = $&;
-		notify($ERRORS{'OK'}, 0, "The indstance_id: $instance_id\n");
-		return $instance_id;
+		$instance = $self->{compute}->create_server({ name => $computer_shortname, flavorRef => $flavor_type, imageRef => $image_name });
 	}
-	else
+	catch
 	{
-		notify($ERRORS{'OK'}, 0, "Fail to run the instance");
+		notify($ERRORS{'WARNING'}, 0, "Failed to run instance");
 		return 0;
-	}
+	};
+
+	notify($ERRORS{'OK'}, 0, "Instance $instance->{id} created successfully");
 }
 
 sub _update_private_ip {
@@ -905,44 +893,37 @@ sub _update_private_ip {
 
 	my $instance_id = shift;
 	my $main_loop = 60;
-	my $private_ip;
 	my $describe_instance_output;
 	my $computer_shortname  = $self->data->get_computer_short_name;
-	my $describe_instance = "nova list |grep  $instance_id";
-	notify($ERRORS{'OK'}, 0, "Describe Instance: $describe_instance");
 
-	# Find the correct instance among running instances using the private IP
-	while($main_loop > 0 && !defined($private_ip))
-	{
-		notify($ERRORS{'OK'}, 0, "Try to fetch the Private IP on Computer $computer_shortname: Number $main_loop");
-		$describe_instance_output = `$describe_instance`;
-		notify($ERRORS{'OK'}, 0, "Describe Instance: $describe_instance_output");
+	while($main_loop > 0) {
+		my $instance = $self->{compute}->get_server($instance_id);
+		if (!$instance) {
+			notify($ERRORS{'WARNING'}, 0, "Couldn't find instance $instance");
+			return 0;
+		}
 
-		if($describe_instance_output =~ m/($RE{net}{IPv4})/g)
-		{
-			$private_ip = $&;
+		my @private_addresses = @{$instance->{addresses}->{private}};
+		if (scalar @private_addresses > 0) {
+			my $private_ip = $private_addresses[0]->{addr};
 			notify($ERRORS{'OK'}, 0, "The instance private IP on Computer $computer_shortname: $private_ip");
-			if (defined($private_ip) && $private_ip ne "") {
+
+			if ($private_ip ne "") {
 				notify($ERRORS{'OK'}, 0, "Removing old hosts entry");
 				my $sedoutput = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
 				notify($ERRORS{'DEBUG'}, 0, $sedoutput);
 				`echo -e "$private_ip\t$computer_shortname" >> /etc/hosts`;
 				my $new_private_ip = $self->data->set_computer_private_ip_address($private_ip);
 				if(!$new_private_ip) {
-					notify($ERRORS{'OK'}, 0, "The $private_ip on Computer $computer_shortname is NOT updated");
+					notify($ERRORS{'WARNING'}, 0, "The $private_ip on Computer $computer_shortname is NOT updated");
 					return 0;
 				}
-				goto EXIT_WHILELOOP;
+				break;
 			}
 		}
-		else {
-				notify($ERRORS{'DEBUG'}, 0, "Private IP for $computer_shortname is not determined");
-		}
-
 		sleep 20;
 		$main_loop--;
 	}
-	EXIT_WHILELOOP:
 
 	return 1;
 }
