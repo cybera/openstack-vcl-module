@@ -130,7 +130,8 @@ sub load {
 	}
 
 	# Create new instance
-	my $instance_id = $self->_run_instances;
+	my $instance = $self->_run_instances;
+	my $instance_id = $instance->{id};
 
 	if ($instance_id)
 	{
@@ -138,7 +139,7 @@ sub load {
 	}
 	else
 	{
-		notify($ERRORS{'CRITICAL'}, 0, "Fail to run the instance $instance_id");
+		notify($ERRORS{'CRITICAL'}, 0, "Fail to run the instance");
 		return 0;
 	}
 
@@ -398,7 +399,7 @@ sub _wait_for_copying_image {
 
 	if (!$image_details)
 	{
-		notify($ERRORS{'WARNING'}, 0, "Get image request failed"):
+		notify($ERRORS{'WARNING'}, 0, "Get image request failed");
 		return 0;
 	}
 
@@ -411,7 +412,7 @@ sub _wait_for_copying_image {
 	{
 		if($status eq 'ACTIVE') {
 			notify($ERRORS{'OK'}, 0, "$openstack_image_id is available now");
-			break;
+			last;
 		}
 		elsif ($status eq 'SAVING') {
 			notify($ERRORS{'OK'}, 0, "Sleep to capture New Image for 25 secs");
@@ -747,11 +748,14 @@ sub _set_openstack_user_conf {
 	my $os_password = $self->{config}->{os_password};
 	my $os_default_flavor = $self->{config}->{os_default_flavor};
 
-	# Set Environment File
-	$ENV{'OS_AUTH_URL'} = $os_auth_url;
-	$ENV{'OS_TENANT_NAME'} = $os_tenant_name;
-	$ENV{'OS_USERNAME'} = $os_username;
-	$ENV{'OS_PASSWORD'} = $os_password;
+	my $compute = Net::OpenStack::Compute->new(
+		auth_url	=> $os_auth_url,
+		user		=> $os_username,
+		password	=> $os_password,
+		project_id	=> $os_tenant_name,
+	);
+
+	$self->{compute} = $compute;
 
 	return 1;
 }# _set_openstack_user_conf close
@@ -874,6 +878,7 @@ sub _run_instances {
 
 	my $flavor_type = $self->_get_image_flavor($image_name);
 	notify($ERRORS{'DEBUG'}, 0, "flavor is: $flavor_type");
+	my $instance;
 
 	try
 	{
@@ -886,6 +891,8 @@ sub _run_instances {
 	};
 
 	notify($ERRORS{'OK'}, 0, "Instance $instance->{id} created successfully");
+
+	return $instance;
 }
 
 sub _update_private_ip {
@@ -899,13 +906,14 @@ sub _update_private_ip {
 	while($main_loop > 0) {
 		my $instance = $self->{compute}->get_server($instance_id);
 		if (!$instance) {
-			notify($ERRORS{'WARNING'}, 0, "Couldn't find instance $instance");
+			notify($ERRORS{'WARNING'}, 0, "Couldn't find instance");
 			return 0;
 		}
 
-		my @private_addresses = @{$instance->{addresses}->{private}};
-		if (scalar @private_addresses > 0) {
-			my $private_ip = $private_addresses[0]->{addr};
+		my $addresses = $instance->{addresses};
+		my @keys = keys %$addresses;
+		if (scalar @keys > 0) {
+			my $private_ip = $addresses->{$keys[0]}[0]->{addr};
 			notify($ERRORS{'OK'}, 0, "The instance private IP on Computer $computer_shortname: $private_ip");
 
 			if ($private_ip ne "") {
@@ -918,14 +926,17 @@ sub _update_private_ip {
 					notify($ERRORS{'WARNING'}, 0, "The $private_ip on Computer $computer_shortname is NOT updated");
 					return 0;
 				}
-				break;
+				return 1;
 			}
 		}
+
+		notify($ERRORS{'OK'}, 0, "Sleeping while waiting for instance to obtain IP address");
 		sleep 20;
 		$main_loop--;
 	}
 
-	return 1;
+	notify($ERRORS{'WARNING'}, 0, "Timed out while waiting for instance to obtain IP address");
+	return 0;
 }
 #/////////////////////////////////////////////////////////////////////////////
 
