@@ -77,7 +77,7 @@ sub initialize {
 	my $self = shift;
 	notify($ERRORS{'DEBUG'}, 0, "OpenStack module initialized");
 
-	if($self->_set_openstack_user_conf) {
+	if ($self->_set_openstack_user_conf) {
 		notify($ERRORS{'OK'}, 0, "Success to OpenStack user configuration");
 	}
 	else {
@@ -87,7 +87,6 @@ sub initialize {
 
 	return 1;
 } ## end sub initialize
-
 
 #/////////////////////////////////////////////////////////////////////////////
 
@@ -115,45 +114,30 @@ sub load {
 	my $computer_shortname   = $self->data->get_computer_short_name;
 	my $request_forimaging   = $self->data->get_request_forimaging();
 
-
-	notify($ERRORS{'OK'}, 0, "Query the host to see if the $computer_shortname currently exists");
-
 	# power off the old instance if exists
-	if(_pingnode($computer_shortname) || $request_forimaging == 0)
-	{
-		if($self->_terminate_instances) {
-			notify($ERRORS{'OK'}, 0, "Terminate the existing computer $computer_shortname");
-		}
-		else {
-			notify($ERRORS{'DEBUG'}, 0, "No instance to terminate for $computer_shortname");
-		}
-	}
+	$self->_terminate_instances;	
 
 	# Create new instance
 	my $instance = $self->_run_instances;
-	my $instance_id = $instance->{id};
+	my $instance_id;
 
-	if ($instance_id)
-	{
-		notify($ERRORS{'OK'}, 0, "The instance $instance_id is created\n");
+	if ($instance) {
+		$instance_id = $instance->{id};
+		notify($ERRORS{'OK'}, 0, "The instance $instance_id has been created\n");
 	}
-	else
-	{
-		notify($ERRORS{'CRITICAL'}, 0, "Fail to run the instance");
+	else {
+		notify($ERRORS{'CRITICAL'}, 0, "Failed to run the instance");
 		return 0;
 	}
 
 	# Update the private ip of the instance in /etc/hosts file
-	if($self->_update_private_ip($instance_id))
-	{
-		notify($ERRORS{'OK'}, 0, "Update the private ip of instance $instance_id is succeeded\n");
+	if ($self->_update_private_ip($instance_id)) {
+		notify($ERRORS{'OK'}, 0, "Updated the private ip of instance $instance_id");
 	}
-	else
-	{
-		notify($ERRORS{'CRITICAL'}, 0, "Fail to update private ip of the instance in /etc/hosts");
+	else {
+		notify($ERRORS{'CRITICAL'}, 0, "Failed to update private ip of the instance in /etc/hosts");
 		return 0;
 	}
-
 
 	# Instances have the ip instantly when it use FlatNetworkManager
 	# Need to wait for copying images from repository or cache to instance directory
@@ -204,42 +188,36 @@ sub capture {
 	my $computer_shortname = $self->data->get_computer_short_name;
 	my $instance_id;
 
-	if(_pingnode($computer_shortname))
-	{
+	if (_pingnode($computer_shortname)) {
 		$instance_id = $self->_get_instance_id;
-		notify($ERRORS{'OK'}, 0, "instance id: $instance_id is done");
-		if(!$instance_id)
-		{
-			notify($ERRORS{'DEBUG'}, 0, "unable to get instance id for $computer_shortname");
+
+		if (!$instance_id) {
+			notify($ERRORS{'DEBUG'}, 0, "Unable to get instance id for $computer_shortname");
 			return 0;
 		}
 	}
 	else {
-		notify($ERRORS{'DEBUG'}, 0, "unable to ping to $computer_shortname");
+		notify($ERRORS{'WARNING'}, 0, "Unable to ping to $computer_shortname");
 		return 0;
 	}
 
-	if($self->_prepare_capture)
-	{
+	if ($self->_prepare_capture) {
 		notify($ERRORS{'OK'}, 0, "Prepare_Capture for $computer_shortname is done");
 	}
 
 	my $openstack_image_id = $self->_image_create($instance_id);
 
-	if(!$openstack_image_id)
-	{
+	if (!$openstack_image_id) {
 		notify($ERRORS{'CRITICAL'}, 0, "Nova create image request failed");
 		return 0;
 	}
 
-	if(!$self->_insert_openstack_image_name($openstack_image_id))
-	{
+	if (!$self->_insert_openstack_image_name($openstack_image_id)) {
 		notify($ERRORS{'CRITICAL'}, 0, "Database insert failed");
 		return 0;
 	}
 
-	if(!$self->_wait_for_copying_image($openstack_image_id))
-	{
+	if (!$self->_wait_for_copying_image($openstack_image_id)) {
 		notify($ERRORS{'CRITICAL'}, 0, "Image copying failed");
 	}
 
@@ -252,25 +230,16 @@ sub _image_create{
 	my $imagerevision_comments = $self->data->get_imagerevision_comments(0);
 	my $image_name = $self->data->get_image_name();
 
-	my $image_version;
-	if($image_name =~ m/(-+)(.+)(-v\d+)/g)
-	{
-		$image_version = $3;
-		notify($ERRORS{'OK'}, 0, "Acquire the Image Version: $image_version");
-	}
-
 	my $image_description = $image_name . '-' . $imagerevision_comments;
 	my $openstack_image_id;
 	notify($ERRORS{'OK'}, 0, "Capturing instance $instance_id for $image_description");
 
-	try
-	{
+	try {
 		my $image = $self->{compute}->create_image($instance_id, { name => $image_description});
 		$openstack_image_id = $image->{id};
 		notify($ERRORS{'OK'}, 0, "OpenStack image ID: $openstack_image_id");
 	}
-	catch
-	{
+	catch {
 		notify($ERRORS{'WARNING'}, 0, "Failed to capture image");
 		$openstack_image_id = "";
 	};
@@ -280,34 +249,28 @@ sub _image_create{
 
 sub _get_instance_id {
 	my $self = shift;
+	my $computer_id = $self->data->get_computer_id;
 
-	my $describe_instance;
-	my $describe_instance_output;
-	my $instance_id;
+	my $select_statement = "
+	SELECT
+	instanceid
+	FROM
+	openstackComputerMap
+	WHERE
+	computerid = '$computer_id'
+	";
 
-	my $instance_private_ip = $self->data->get_computer_private_ip_address();
-	my $computer_shortname = $self->data->get_computer_short_name;
+	notify($ERRORS{'OK'}, 0, "$select_statement");
+	my @selected_rows = database_select($select_statement);
 
-	if(!$instance_private_ip) {
-		notify($ERRORS{'DEBUG'}, 0, "The $computer_shortname is NOT currently exist");
+	if (scalar @selected_rows == 0) {
 		return 0;
 	}
-	else {
 
-		$describe_instance = "nova list |grep $instance_private_ip";
-		$describe_instance_output = `$describe_instance`;
+	my $instance_id = $selected_rows[0]{instanceid};
+	notify($ERRORS{'OK'}, 0, "Openstack id for $computer_id is $instance_id");
 
-		if($describe_instance_output  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
-		{
-			$instance_id = $&;
-			notify($ERRORS{'OK'}, 0, "The $computer_shortname has private IP : $instance_private_ip");
-			notify($ERRORS{'OK'}, 0, "The Instance ID: $instance_id");
-			return $instance_id;
-		} else {
-			notify($ERRORS{'DEBUG'}, 0, "The $computer_shortname is NOT currently exist");
-			return 0;
-		}
-	}
+	return $instance_id;
 }
 
 sub _prepare_capture {
@@ -389,6 +352,60 @@ sub _insert_openstack_image_name {
 	}
 }
 
+sub _insert_instance_id {
+	my $self = shift;
+	my $instance_id = shift;
+	my $computer_id = $self->data->get_computer_id;
+
+	my $insert_statement = "
+	INSERT INTO
+	openstackComputerMap (
+	  instanceid,
+	  computerid
+	) VALUES (
+	  '$instance_id',
+	  '$computer_id'
+	)";
+
+	notify($ERRORS{'OK'}, 0, "$insert_statement");
+	my $success = database_execute($insert_statement);
+
+	if ($success) {
+		notify($ERRORS{'OK'}, 0, "Successfully inserted instance id");
+		return 1;
+	}
+	else {
+		notify($ERRORS{'WARNING'}, 0, "Unable to insert instance id");
+		return 0;
+	}
+}
+
+sub _delete_instance_id {
+	my $self = shift;
+	my $instance_id = shift;
+	my $computer_id = $self->data->get_computer_id;
+
+	my $delete_statement = "
+	DELETE FROM
+	openstackComputerMap
+	WHERE
+	instanceid='$instance_id' AND
+	computerid='$computer_id'
+	";
+
+	notify($ERRORS{'OK'}, 0, "$delete_statement");
+	my $success = database_execute($delete_statement);
+
+	if ($success) {
+		notify($ERRORS{'OK'}, 0, "Successfully deleted instance id");
+		return 1;
+	}
+	else {
+		notify($ERRORS{'WARNING'}, 0, "Unable to delete instance id");
+		return 0;
+	}
+}
+
 sub _wait_for_copying_image {
 	my $self = shift;
 
@@ -397,8 +414,7 @@ sub _wait_for_copying_image {
 	my $image_details = $self->{compute}->get_image($openstack_image_id);
 	my $status;
 
-	if (!$image_details)
-	{
+	if (!$image_details) {
 		notify($ERRORS{'WARNING'}, 0, "Get image request failed");
 		return 0;
 	}
@@ -408,9 +424,8 @@ sub _wait_for_copying_image {
 	my $loop = 150;
 
 	notify($ERRORS{'OK'}, 0, "The status for $openstack_image_id: $status");
-	while ($loop > 0)
-	{
-		if($status eq 'ACTIVE') {
+	while ($loop > 0) {
+		if ($status eq 'ACTIVE') {
 			notify($ERRORS{'OK'}, 0, "$openstack_image_id is available now");
 			last;
 		}
@@ -472,7 +487,6 @@ sub node_status {
 	# Set IAAS Environment
 	notify($ERRORS{'OK'}, 0, "Set OpenStack Environment");
 
-
 	# Check if subroutine was called as a class method
 	if (ref($self) !~ /openstack/i) {
 		notify($ERRORS{'OK'}, 0, "subroutine was called as a function");
@@ -533,7 +547,6 @@ sub node_status {
 
 	notify($ERRORS{'DEBUG'}, 0, "Trying to ssh...");
 
-
 	#can I ssh into it
 	my $sshd = _sshd_status($vmclient_shortname, $vcl_requestedimagename, $image_os_type);
 
@@ -570,7 +583,6 @@ sub node_status {
 
 	notify($ERRORS{'DEBUG'}, 0, "status set to $status{status}");
 
-
 	if ($request_forimaging) {
 		$status{status} = 'RELOAD';
 		notify($ERRORS{'OK'}, 0, "request_forimaging set, setting status to RELOAD");
@@ -580,7 +592,6 @@ sub node_status {
 	return \%status;
 
 } ## end sub node_status
-
 
 sub does_image_exist {
 	my $self = shift;
@@ -649,7 +660,6 @@ sub _get_image_flavor {
 
 	notify($ERRORS{'OK'}, 0, "No image size information in Openstack");
 
-
 	# XXX NOTE: The like part of this statement will cause issues if there is more than one version
 	#	   of an image, which I don't think there should be -- Curtis XXX
 	my $select_statement = "
@@ -662,18 +672,18 @@ sub _get_image_flavor {
 	";
 
 	notify($ERRORS{'OK'}, 0, "flavor select_statement: $select_statement");
-# Call the database select subroutine
-# This will return an array of one or more rows based on the select statement
-my @selected_rows = database_select($select_statement);
-	# Check to make sure 1 row was returned
-if (scalar @selected_rows == 0) {
-	return 0;
-}
-elsif (scalar @selected_rows > 1) {
-	notify($ERRORS{'WARNING'}, 0, "" . scalar @selected_rows . " rows were returned from database select");
-	return 0;
-}
-my $flavor = $selected_rows[0]{flavor};
+	# Call the database select subroutine
+	# This will return an array of one or more rows based on the select statement
+	my @selected_rows = database_select($select_statement);
+		# Check to make sure 1 row was returned
+	if (scalar @selected_rows == 0) {
+		return 0;
+	}
+	elsif (scalar @selected_rows > 1) {
+		notify($ERRORS{'WARNING'}, 0, "" . scalar @selected_rows . " rows were returned from database select");
+		return 0;
+	}
+	my $flavor = $selected_rows[0]{flavor};
 
 	if (defined($flavor) && $flavor ne "") {
 		notify($ERRORS{'OK'}, 0, "Using flavor from database");
@@ -682,11 +692,7 @@ my $flavor = $selected_rows[0]{flavor};
 		notify($ERRORS{'OK'}, 0, "Flavor from database is NULL, using default flavor from openstack configuration file");
 		return $os_default_flavor;
 	}
-
-
 } ## end sub get_image_size
-
-
 
 #/////////////////////////////////////////////////////////////////////////////
 
@@ -723,7 +729,6 @@ example: openstack.conf
 "os_username" => "admin",
 "os_password" => "adminpassword",
 "os_auth_url" => "http://openstack_nova_url:5000/v2.0/",
-
 
 =cut
 
@@ -807,52 +812,38 @@ sub _match_image_name {
 
 }# _match_image_name close
 
-
 sub _terminate_instances {
-
 	my $self = shift;
 
 	my $computer_shortname  = $self->data->get_computer_short_name;
 	my $instance_private_ip = $self->data->get_computer_private_ip_address();
+	my $instance_id = $self->_get_instance_id;
 
-	my $instance_id;
-	my $describe_instances;
-	my $run_describe_instances;
-	my $terminate_instances;
-	my $run_terminate_instances;
-	if(!$instance_private_ip) {
-		notify($ERRORS{'OK'}, 0, "The $computer_shortname is NOT currently running");
-		return 1;
+	if ($instance_id) {
+		notify($ERRORS{'OK'}, 0, "Terminate the existing instance");
+		$self->_delete_instance_id($instance_id);
+		try
+		{
+			$self->{compute}->delete_server($instance_id);
+			notify($ERRORS{'OK'}, 0, "Deleted instance $instance_id");
+		}
+		catch
+		{
+			notify($ERRORS{'WARNING'}, 0, "Failed to delete instance $instance_id: $_");
+		};
 	}
 	else {
-		$describe_instances = "nova list | grep $instance_private_ip | grep -v vcl-prod";
-		$run_describe_instances = `$describe_instances`;
-
-		if($run_describe_instances =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
-		{
-			$instance_id = $&;
-			notify($ERRORS{'OK'}, 0, "Terminate the existing instance");
-			try
-			{
-				$self->{compute}->delete_server($instance_id);
-			}
-			catch
-			{
-				notify($ERRORS{'WARNING'}, 0, "Failed to delete instance $instance_id: $_");
-			};
-			notify($ERRORS{'OK'}, 0, "Deleted instance $instance_id");
-			# Remove the computer and IP address from /etc/hosts to avoid duplicates -- Curtis
-			# Wonder if we just need to delete the computer name not the IP too...
-			my $sedoutput_computer_shortname = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
-			notify($ERRORS{'DEBUG'}, 0, "sed output to delete $computer_shortname from hosts file: $sedoutput_computer_shortname");
-			my $sedoutput_instance_private_ip = `sed -i "/^$instance_private_ip/d" /etc/hosts`;
-			notify($ERRORS{'DEBUG'}, 0, "sed output to delete $instance_private_ip from hosts file: $sedoutput_instance_private_ip");
-			# done
-		}
-		else {
-			notify($ERRORS{'DEBUG'}, 0, "No running instance with the privagte ip: $instance_private_ip");
-			return 0;
-		}
+		notify($ERRORS{'OK'}, 0, "No instance found for $computer_shortname");
+	}
+	
+	if ($instance_private_ip) {
+		# Remove the computer and IP address from /etc/hosts to avoid duplicates -- Curtis
+		# Wonder if we just need to delete the computer name not the IP too...
+		my $sedoutput_computer_shortname = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
+		notify($ERRORS{'DEBUG'}, 0, "sed output to delete $computer_shortname from hosts file: $sedoutput_computer_shortname");
+		my $sedoutput_instance_private_ip = `sed -i "/^$instance_private_ip/d" /etc/hosts`;
+		notify($ERRORS{'DEBUG'}, 0, "sed output to delete $instance_private_ip from hosts file: $sedoutput_instance_private_ip");
+		# done
 	}
 
 	return 1;
@@ -866,12 +857,10 @@ sub _run_instances {
 	my $computer_shortname  = $self->data->get_computer_short_name;
 
 	my $image_name = _match_image_name($image_full_name);
-	if($image_name  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g )
-	{
+	if ($image_name  =~ m/(\w{8}-\w{4}-\w{4}-\w{4}-\w{12})/g) {
 		notify($ERRORS{'OK'}, 0, "Acquire the Image ID: $image_name");
 	}
-	else
-	{
+	else {
 		notify($ERRORS{'DEBUG'}, 0, "Fail to acquire the Image ID: $image_name");
 		return 0;
 	}
@@ -880,17 +869,20 @@ sub _run_instances {
 	notify($ERRORS{'DEBUG'}, 0, "flavor is: $flavor_type");
 	my $instance;
 
-	try
-	{
+	try {
 		$instance = $self->{compute}->create_server({ name => $computer_shortname, flavorRef => $flavor_type, imageRef => $image_name });
 	}
-	catch
-	{
+	catch {
 		notify($ERRORS{'WARNING'}, 0, "Failed to run instance");
 		return 0;
 	};
 
 	notify($ERRORS{'OK'}, 0, "Instance $instance->{id} created successfully");
+	my $insert_success = $self->_insert_instance_id($instance->{id});
+
+	if (!$insert_success) {
+		return 0;
+	}
 
 	return $instance;
 }
@@ -922,7 +914,7 @@ sub _update_private_ip {
 				notify($ERRORS{'DEBUG'}, 0, $sedoutput);
 				`echo -e "$private_ip\t$computer_shortname" >> /etc/hosts`;
 				my $new_private_ip = $self->data->set_computer_private_ip_address($private_ip);
-				if(!$new_private_ip) {
+				if (!$new_private_ip) {
 					notify($ERRORS{'WARNING'}, 0, "The $private_ip on Computer $computer_shortname is NOT updated");
 					return 0;
 				}
