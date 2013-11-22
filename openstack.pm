@@ -231,18 +231,21 @@ sub _image_create{
 	my $image_name = $self->data->get_image_name();
 
 	my $image_description = $image_name . '-' . $imagerevision_comments;
-	my $openstack_image_id;
 	notify($ERRORS{'OK'}, 0, "Capturing instance $instance_id for $image_description");
 
 	try {
-		my $image = $self->{compute}->create_image($instance_id, { name => $image_description});
-		$openstack_image_id = $image->{id};
-		notify($ERRORS{'OK'}, 0, "OpenStack image ID: $openstack_image_id");
+		$self->{compute}->create_image($instance_id, { name => $image_description});
+		notify($ERRORS{'OK'}, 0, "Image capture initiated");
 	}
 	catch {
-		notify($ERRORS{'WARNING'}, 0, "Failed to capture image");
-		$openstack_image_id = "";
+		notify($ERRORS{'WARNING'}, 0, "Failed to capture image: $_");
+		return 0;
 	};
+
+	sleep 10;
+
+	my $images = $self->{compute}->get_images({ server => $instance_id });
+	my $openstack_image_id = ${$images}[0]->{id};
 
 	return $openstack_image_id;
 }
@@ -342,7 +345,7 @@ sub _insert_openstack_image_name {
 	my $requested_id = database_execute($insert_statement);
 	notify($ERRORS{'OK'}, 0, "SQL Insert is first time or requested_id : $requested_id");
 
-	if (!$requested_id) {
+	if ($requested_id) {
 		notify($ERRORS{'OK'}, 0, "Successfully insert image name");
 		return 1;
 	}
