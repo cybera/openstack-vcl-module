@@ -383,16 +383,14 @@ sub _insert_instance_id {
 	}
 }
 
-sub _delete_instance_id {
+sub _delete_computer_mapping {
 	my $self = shift;
-	my $instance_id = shift;
 	my $computer_id = $self->data->get_computer_id;
 
 	my $delete_statement = "
 	DELETE FROM
 	openstackComputerMap
 	WHERE
-	instanceid='$instance_id' AND
 	computerid='$computer_id'
 	";
 
@@ -400,11 +398,11 @@ sub _delete_instance_id {
 	my $success = database_execute($delete_statement);
 
 	if ($success) {
-		notify($ERRORS{'OK'}, 0, "Successfully deleted instance id");
+		notify($ERRORS{'OK'}, 0, "Successfully deleted computer mapping");
 		return 1;
 	}
 	else {
-		notify($ERRORS{'WARNING'}, 0, "Unable to delete instance id");
+		notify($ERRORS{'WARNING'}, 0, "Unable to delete computer mapping");
 		return 0;
 	}
 }
@@ -821,10 +819,10 @@ sub _terminate_instances {
 	my $computer_shortname  = $self->data->get_computer_short_name;
 	my $instance_private_ip = $self->data->get_computer_private_ip_address();
 	my $instance_id = $self->_get_instance_id;
+	$self->_delete_computer_mapping;
 
 	if ($instance_id) {
 		notify($ERRORS{'OK'}, 0, "Terminate the existing instance");
-		$self->_delete_instance_id($instance_id);
 		try
 		{
 			$self->{compute}->delete_server($instance_id);
