@@ -823,13 +823,11 @@ sub _terminate_instances {
 
 	if ($instance_id) {
 		notify($ERRORS{'OK'}, 0, "Terminate the existing instance");
-		try
-		{
+		try {
 			$self->{compute}->delete_server($instance_id);
 			notify($ERRORS{'OK'}, 0, "Deleted instance $instance_id");
 		}
-		catch
-		{
+		catch {
 			notify($ERRORS{'WARNING'}, 0, "Failed to delete instance $instance_id: $_");
 		};
 	}
@@ -874,9 +872,12 @@ sub _run_instances {
 		$instance = $self->{compute}->create_server({ name => $computer_shortname, flavorRef => $flavor_type, imageRef => $image_name });
 	}
 	catch {
-		notify($ERRORS{'WARNING'}, 0, "Failed to run instance");
-		return 0;
+		notify($ERRORS{'WARNING'}, 0, "Failed to run instance: $_");
 	};
+
+	if (!$instance->{id}) {
+		return 0;
+	}
 
 	notify($ERRORS{'OK'}, 0, "Instance $instance->{id} created successfully");
 	my $insert_success = $self->_insert_instance_id($instance->{id});
