@@ -233,7 +233,7 @@ sub _image_create{
 	my $image_description = $image_name . '-' . $imagerevision_comments;
 	notify($ERRORS{'OK'}, 0, "Capturing instance $instance_id for $image_description");
 
-	try {
+	my $success = try {
 		$self->{compute}->create_image($instance_id, { name => $image_description});
 		notify($ERRORS{'OK'}, 0, "Image capture initiated");
 	}
@@ -241,6 +241,8 @@ sub _image_create{
 		notify($ERRORS{'WARNING'}, 0, "Failed to capture image: $_");
 		return 0;
 	};
+
+	return 0 unless $success;
 
 	sleep 10;
 
@@ -868,16 +870,15 @@ sub _run_instances {
 	notify($ERRORS{'DEBUG'}, 0, "flavor is: $flavor_type");
 	my $instance;
 
-	try {
+	my $success = try {
 		$instance = $self->{compute}->create_server({ name => $computer_shortname, flavorRef => $flavor_type, imageRef => $image_name });
 	}
 	catch {
 		notify($ERRORS{'WARNING'}, 0, "Failed to run instance: $_");
+		return 0;
 	};
 
-	if (!$instance->{id}) {
-		return 0;
-	}
+	return 0 unless $success;
 
 	notify($ERRORS{'OK'}, 0, "Instance $instance->{id} created successfully");
 	my $insert_success = $self->_insert_instance_id($instance->{id});
