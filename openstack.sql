@@ -26,6 +26,6 @@ INSERT INTO provisioningOSinstalltype (provisioningid, OSinstalltypeid)
 INSERT INTO OSinstalltype (id, name)
   VALUES (6, 'openstack');
 
-# Change based on your own OS requirements
+-- Change based on your own OS requirements
 INSERT INTO OS (id, name, prettyname, type, installtype, sourcepath, moduleid)
   VALUES (45, "rhel6openstack", "CentOS 6 OpenStack", "linux", "openstack", "centos6", 5);
