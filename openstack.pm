@@ -130,12 +130,12 @@ sub load {
 		return 0;
 	}
 
-	# Update the private ip of the instance in /etc/hosts file
+	# Update the private ip of the instance 
 	if ($self->_update_private_ip($instance_id)) {
 		notify($ERRORS{'OK'}, 0, "Updated the private ip of instance $instance_id");
 	}
 	else {
-		notify($ERRORS{'CRITICAL'}, 0, "Failed to update private ip of the instance in /etc/hosts");
+		notify($ERRORS{'CRITICAL'}, 0, "Failed to update private ip of the instance");
 		return 0;
 	}
 
@@ -837,16 +837,6 @@ sub _terminate_instances {
 		notify($ERRORS{'OK'}, 0, "No instance found for $computer_shortname");
 	}
 	
-	if ($instance_private_ip) {
-		# Remove the computer and IP address from /etc/hosts to avoid duplicates -- Curtis
-		# Wonder if we just need to delete the computer name not the IP too...
-		my $sedoutput_computer_shortname = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
-		notify($ERRORS{'DEBUG'}, 0, "sed output to delete $computer_shortname from hosts file: $sedoutput_computer_shortname");
-		my $sedoutput_instance_private_ip = `sed -i "/^$instance_private_ip/d" /etc/hosts`;
-		notify($ERRORS{'DEBUG'}, 0, "sed output to delete $instance_private_ip from hosts file: $sedoutput_instance_private_ip");
-		# done
-	}
-
 	return 1;
 }
 
@@ -912,10 +902,6 @@ sub _update_private_ip {
 			notify($ERRORS{'OK'}, 0, "The instance private IP on Computer $computer_shortname: $private_ip");
 
 			if ($private_ip ne "") {
-				notify($ERRORS{'OK'}, 0, "Removing old hosts entry");
-				my $sedoutput = `sed -i "/.*\\b$computer_shortname\$/d" /etc/hosts`;
-				notify($ERRORS{'DEBUG'}, 0, $sedoutput);
-				`echo -e "$private_ip\t$computer_shortname" >> /etc/hosts`;
 				my $new_private_ip = $self->data->set_computer_private_ip_address($private_ip);
 				if (!$new_private_ip) {
 					notify($ERRORS{'WARNING'}, 0, "The $private_ip on Computer $computer_shortname is NOT updated");
