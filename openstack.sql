@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS `openstackComputerMap` (
 CREATE TABLE IF NOT EXISTS openstackImageNameMap (
   openstackimagename varchar(50) NOT NULL DEFAULT '',
   vclimagename varchar(50) NOT NULL DEFAULT '',
+  flavor tinyint(4) DEFAULT NULL,
   PRIMARY KEY (openstackimagename,vclimagename)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1;
 
@@ -20,11 +21,11 @@ INSERT INTO module (id, name, prettyname, description, perlpackage)
 INSERT INTO provisioning (id, name, prettyname, moduleid)
   VALUES (NULL, 'openstack', 'OpenStack Provisioning', '28');
 
-INSERT INTO provisioningOSinstalltype (provisioningid, OSinstalltypeid)
-  VALUES ('11', '6');
-
 INSERT INTO OSinstalltype (id, name)
   VALUES (6, 'openstack');
+
+INSERT INTO provisioningOSinstalltype (provisioningid, OSinstalltypeid)
+  VALUES ('11', '6');
 
 -- Change based on your own OS requirements
 INSERT INTO OS (id, name, prettyname, type, installtype, sourcepath, moduleid)
