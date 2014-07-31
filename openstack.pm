@@ -115,7 +115,7 @@ sub load {
 	my $request_forimaging   = $self->data->get_request_forimaging();
 
 	# power off the old instance if exists
-	$self->_terminate_instances;	
+	$self->_terminate_instances;
 
 	# Create new instance
 	my $instance = $self->_run_instances;
@@ -130,7 +130,7 @@ sub load {
 		return 0;
 	}
 
-	# Update the private ip of the instance 
+	# Update the private ip of the instance
 	if ($self->_update_private_ip($instance_id)) {
 		notify($ERRORS{'OK'}, 0, "Updated the private ip of instance $instance_id");
 	}
@@ -219,6 +219,7 @@ sub capture {
 
 	if (!$self->_wait_for_copying_image($openstack_image_id)) {
 		notify($ERRORS{'CRITICAL'}, 0, "Image copying failed");
+		return 0;
 	}
 
 	return 1;
@@ -836,7 +837,7 @@ sub _terminate_instances {
 	else {
 		notify($ERRORS{'OK'}, 0, "No instance found for $computer_shortname");
 	}
-	
+
 	return 1;
 }
 
